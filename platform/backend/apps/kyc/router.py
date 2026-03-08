@@ -37,6 +37,7 @@ from packages.schemas.kyc import (
     KYCExtraction,
     KYCValidationCheck,
 )
+from packages.kyb.service import build_kyb_checks
 
 router = APIRouter()
 
@@ -139,6 +140,13 @@ class DecisionResponse(BaseDTO):
     created_at: datetime
 
 
+class DeterministicCheckResponse(BaseDTO):
+    check_type: str
+    result: str
+    reason: str
+    details: dict
+
+
 # ─── Endpoints ───
 
 @router.post("/cases", response_model=APIResponse[CaseResponse])
@@ -162,6 +170,11 @@ async def create_case(
         entity_type=body.entity_type,
         entity_id=body.entity_id,
         status="created",
+        metadata_={
+            "pan_number": body.pan_number,
+            "aadhaar_number": body.aadhaar_number,
+            "gstin": body.gstin,
+        },
     )
     session.add(case)
     await session.flush()
@@ -237,6 +250,76 @@ async def upload_document(
     return APIResponse.ok(DocumentResponse.model_validate(doc))
 
 
+@router.post("/cases/{case_id}/run-deterministic-checks", response_model=APIResponse[list[DeterministicCheckResponse]])
+async def run_deterministic_checks(
+    case_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    x_tenant_id: str = Header(...),
+):
+    """Run deterministic KYB checks and persist results for audit + checker workflows."""
+    tenant_id = uuid.UUID(x_tenant_id)
+
+    case_stmt = select(KYCCase).where(KYCCase.id == case_id, KYCCase.tenant_id == tenant_id)
+    case_result = await session.execute(case_stmt)
+    case = case_result.scalar_one_or_none()
+    if not case:
+        raise NotFoundError("KYCCase", str(case_id))
+
+    docs_stmt = select(KYCDocument).where(KYCDocument.case_id == case_id, KYCDocument.tenant_id == tenant_id)
+    docs_result = await session.execute(docs_stmt)
+    documents = docs_result.scalars().all()
+
+    extracted_fields: list[dict] = []
+    for document in documents:
+        extraction_stmt = select(KYCExtraction).where(
+            KYCExtraction.document_id == document.id,
+            KYCExtraction.tenant_id == tenant_id,
+        )
+        extraction_result = await session.execute(extraction_stmt)
+        extraction = extraction_result.scalar_one_or_none()
+        if extraction:
+            extracted_fields.append({
+                "document_type": document.document_type,
+                **(extraction.extracted_fields or {}),
+            })
+
+    checks = build_kyb_checks(
+        case_type=case.case_type,
+        entity_type=case.entity_type,
+        entity_name=case.entity_name,
+        entity_id=case.entity_id,
+        document_types={d.document_type for d in documents},
+        extracted_fields=extracted_fields,
+    )
+
+    for check in checks:
+        session.add(
+            KYCValidationCheck(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                check_type=check.check_type,
+                check_provider="deterministic_rules",
+                result=check.result,
+                details={
+                    **check.details,
+                    "reason": check.reason,
+                },
+            )
+        )
+
+    await session.flush()
+
+    return APIResponse.ok([
+        DeterministicCheckResponse(
+            check_type=check.check_type,
+            result=check.result,
+            reason=check.reason,
+            details=check.details,
+        )
+        for check in checks
+    ])
+
+
 @router.post(
     "/cases/{case_id}/verify-document",
     response_model=APIResponse[VerificationResponse],
@@ -279,10 +362,13 @@ async def verify_document(
         case_id=case_id,
         tenant_id=tenant_id,
         check_type=f"kyc_{body.document_type.value}_verification",
-        provider="platform",
-        is_passed=provider_response.is_valid,
-        details=provider_response.details,
-        raw_response=provider_response.raw_response,
+        check_provider="platform",
+        result="pass" if provider_response.is_valid else "fail",
+        details={
+            **provider_response.details,
+            "matched_name": provider_response.matched_name,
+            "raw_response": provider_response.raw_response,
+        },
     )
     session.add(check)
     await session.flush()

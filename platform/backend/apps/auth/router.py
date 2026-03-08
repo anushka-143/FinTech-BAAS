@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.core.errors import AuthenticationError, NotFoundError
 from packages.core.models import APIResponse, BaseDTO
 from packages.db.engine import get_session
+from packages.core.settings import get_settings
 from packages.schemas.auth import User
 from packages.schemas.tenants import APIKey
 from packages.security.auth import (
@@ -69,6 +70,11 @@ async def issue_token(
     user = result.scalar_one_or_none()
 
     if not user:
+        settings = get_settings()
+        if settings.environment == "development" and body.email == "admin@demo-fintech.com":
+            raise AuthenticationError(
+                "Invalid credentials. Demo user not found; run `python -m packages.db.seed`."
+            )
         raise AuthenticationError("Invalid credentials")
 
     # Verify password — bcrypt first, then fallback to direct comparison for seeded demo users
@@ -87,6 +93,11 @@ async def issue_token(
         _password_ok = (body.password == "demo1234" and user.email.endswith("@demo-fintech.com"))
 
     if not _password_ok:
+        settings = get_settings()
+        if settings.environment == "development" and user.email == "admin@demo-fintech.com":
+            raise AuthenticationError(
+                "Invalid credentials for demo user. Expected password is `demo1234` unless changed."
+            )
         user.failed_login_attempts += 1
         await session.commit()
         raise AuthenticationError("Invalid credentials")
@@ -103,7 +114,6 @@ async def issue_token(
         "jti": str(uuid.uuid4()),
     }
 
-    from packages.core.settings import get_settings
     settings = get_settings()
 
     return APIResponse.ok(

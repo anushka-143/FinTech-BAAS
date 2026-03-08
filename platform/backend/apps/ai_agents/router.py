@@ -18,10 +18,13 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from packages.core.errors import NotFoundError
 from packages.core.models import APIResponse, BaseDTO
 from packages.db.engine import get_session
+from packages.schemas.kyc import KYCCase, KYCDocument, KYCExtraction, KYCValidationCheck
 
 from apps.ai_agents.orchestrator import AIOrchestrator, AITaskType, AIAnalysisResult
 
@@ -76,6 +79,32 @@ def _to_dto(result: AIAnalysisResult) -> AIResultDTO:
     )
 
 
+def _build_contradiction_matrix(extracted_fields: list[dict]) -> list[dict]:
+    """Build simple deterministic contradiction hints for AI grounding."""
+    if not extracted_fields:
+        return []
+
+    pan_names = {item.get("name") for item in extracted_fields if isinstance(item.get("name"), str) and item.get("document_type") == "pan"}
+    gstin_names = {item.get("legal_name") for item in extracted_fields if isinstance(item.get("legal_name"), str) and item.get("document_type") == "gstin"}
+    cin_names = {item.get("company_name") for item in extracted_fields if isinstance(item.get("company_name"), str) and item.get("document_type") == "cin"}
+
+    contradictions: list[dict] = []
+    if pan_names and gstin_names and pan_names != gstin_names:
+        contradictions.append({
+            "type": "pan_vs_gstin_name_mismatch",
+            "pan_names": sorted(pan_names),
+            "gstin_names": sorted(gstin_names),
+        })
+    if gstin_names and cin_names and gstin_names != cin_names:
+        contradictions.append({
+            "type": "gstin_vs_cin_name_mismatch",
+            "gstin_names": sorted(gstin_names),
+            "cin_names": sorted(cin_names),
+        })
+
+    return contradictions
+
+
 # ─── Endpoints ───
 
 @router.post("/triage/payout/{payout_id}", response_model=APIResponse[AIResultDTO])
@@ -95,12 +124,79 @@ async def triage_payout(
 @router.post("/review/kyc/{case_id}", response_model=APIResponse[AIResultDTO])
 async def review_kyc_case(
     case_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
     x_tenant_id: str = Header(...),
 ):
-    """AI review of a KYC case — summarizes extraction, flags mismatches."""
+    """AI review of a KYC/KYB case using live case + extraction context from DB."""
+    tenant_id = uuid.UUID(x_tenant_id)
+
+    case_stmt = select(KYCCase).where(KYCCase.id == case_id, KYCCase.tenant_id == tenant_id)
+    case_result = await session.execute(case_stmt)
+    kyc_case = case_result.scalar_one_or_none()
+    if not kyc_case:
+        raise NotFoundError("KYCCase", str(case_id))
+
+    docs_stmt = select(KYCDocument).where(KYCDocument.case_id == case_id, KYCDocument.tenant_id == tenant_id)
+    docs_result = await session.execute(docs_stmt)
+    documents = docs_result.scalars().all()
+
+    document_summaries: list[dict] = []
+    extracted_fields: list[dict] = []
+    confidences: list[float] = []
+
+    for document in documents:
+        document_summaries.append(
+            {
+                "id": str(document.id),
+                "type": document.document_type,
+                "status": document.status,
+                "file_name": document.file_name,
+            }
+        )
+
+        extraction_stmt = select(KYCExtraction).where(
+            KYCExtraction.document_id == document.id,
+            KYCExtraction.tenant_id == tenant_id,
+        )
+        extraction_result = await session.execute(extraction_stmt)
+        extraction = extraction_result.scalar_one_or_none()
+        if extraction:
+            extracted_fields.append(extraction.extracted_fields)
+            confidences.append(extraction.confidence_score)
+
+    avg_confidence = round(sum(confidences) / len(confidences), 4) if confidences else 0.0
+
+    checks_stmt = select(KYCValidationCheck).where(
+        KYCValidationCheck.case_id == case_id,
+        KYCValidationCheck.tenant_id == tenant_id,
+    )
+    checks_result = await session.execute(checks_stmt)
+    checks = checks_result.scalars().all()
+
+    deterministic_check_outcomes = [
+        {
+            "check_type": check.check_type,
+            "result": check.result,
+            "provider": check.check_provider,
+            "details": check.details,
+        }
+        for check in checks
+    ]
+
     result = await orchestrator.analyze(
         AITaskType.KYC_REVIEW,
-        context={"case_id": str(case_id), "confidence": 0.88, "extracted_fields": []},
+        context={
+            "case_id": str(case_id),
+            "case_type": kyc_case.case_type,
+            "entity_type": kyc_case.entity_type,
+            "entity_name": kyc_case.entity_name,
+            "status": kyc_case.status,
+            "documents": document_summaries,
+            "extracted_fields": extracted_fields,
+            "confidence": avg_confidence,
+            "deterministic_check_outcomes": deterministic_check_outcomes,
+            "contradiction_matrix": _build_contradiction_matrix(extracted_fields),
+        },
         tenant_id=x_tenant_id,
     )
     return APIResponse.ok(_to_dto(result))
