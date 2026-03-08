@@ -279,10 +279,13 @@ async def verify_document(
         case_id=case_id,
         tenant_id=tenant_id,
         check_type=f"kyc_{body.document_type.value}_verification",
-        provider="platform",
-        is_passed=provider_response.is_valid,
-        details=provider_response.details,
-        raw_response=provider_response.raw_response,
+        check_provider="platform",
+        result="pass" if provider_response.is_valid else "fail",
+        details={
+            **provider_response.details,
+            "matched_name": provider_response.matched_name,
+            "raw_response": provider_response.raw_response,
+        },
     )
     session.add(check)
     await session.flush()

@@ -12,6 +12,22 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from packages.core.settings import get_settings
 
 
+def _resolve_log_level(level_name: str) -> int:
+    """Resolve log level names to stdlib numeric levels without structlog helpers."""
+    import logging
+
+    normalized = level_name.strip().upper()
+
+    if normalized.isdigit():
+        return int(normalized)
+
+    resolved = logging.getLevelName(normalized)
+    if isinstance(resolved, int):
+        return resolved
+
+    return logging.INFO
+
+
 def setup_telemetry() -> None:
     """Initialize OpenTelemetry tracer provider with OTLP exporter."""
     settings = get_settings()
@@ -36,7 +52,7 @@ def setup_logging() -> None:
 
     settings = get_settings()
 
-    log_level = logging.getLevelName(settings.log_level.upper())
+    log_level = _resolve_log_level(settings.log_level)
 
     structlog.configure(
         processors=[
