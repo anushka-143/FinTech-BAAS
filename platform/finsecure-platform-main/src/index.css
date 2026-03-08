@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;550;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Premium warm neutrals — quiet luxury */
+    --background: 40 7% 96%;
+    --foreground: 220 20% 10%;
+
+    --card: 40 10% 99%;
+    --card-foreground: 220 20% 10%;
+
+    --popover: 40 10% 99%;
+    --popover-foreground: 220 20% 10%;
+
+    /* Accent — deep muted teal, sophisticated */
+    --primary: 172 40% 32%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary surfaces */
+    --secondary: 40 6% 93%;
+    --secondary-foreground: 220 10% 42%;
+
+    --muted: 40 6% 93%;
+    --muted-foreground: 220 10% 42%;
+
+    --accent: 40 6% 95%;
+    --accent-foreground: 220 20% 10%;
+
+    /* Semantics — muted, enterprise-grade */
+    --destructive: 0 65% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 40 6% 89%;
+    --input: 40 6% 87%;
+    --ring: 172 40% 32%;
+
+    --radius: 8px;
+
+    /* Sidebar — refined */
+    --sidebar-background: 40 10% 99%;
+    --sidebar-foreground: 220 10% 42%;
+    --sidebar-primary: 172 40% 32%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 40 6% 96%;
+    --sidebar-accent-foreground: 220 20% 10%;
+    --sidebar-border: 40 6% 91%;
+    --sidebar-ring: 172 40% 32%;
+
+    /* Semantic status — deliberately muted */
+    --success: 152 55% 30%;
+    --success-foreground: 152 81% 96%;
+    --warning: 32 80% 42%;
+    --warning-foreground: 32 92% 95%;
+    --info: 221 70% 50%;
+    --info-foreground: 221 70% 96%;
+
+    /* Typography */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Premium focus states */
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.3), 0 0 0 3px hsl(var(--primary) / 0.08);
+    border-color: hsl(var(--primary) / 0.4);
+  }
+}

@@ -1,0 +1,29 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific
+    "S",    # flake8-bandit (security)
+    "ASYNC",# flake8-async
+]
+ignore = [
+    "S101",  # assert usage ok in tests
+    "B008",  # function calls in defaults (FastAPI Depends)
+]
+
+[lint.isort]
+known-first-party = ["apps", "packages"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
